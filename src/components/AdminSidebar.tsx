@@ -30,6 +30,7 @@ interface AdminSidebarProps {
   onClose: () => void
   darkMode: boolean
   onToggleDarkMode: () => void
+  onLogout: () => void
 }
 
 const navItems: { id: NavPage; label: string; icon: typeof LayoutDashboard }[] = [
@@ -50,6 +51,7 @@ export function AdminSidebar({
   onClose,
   darkMode,
   onToggleDarkMode,
+  onLogout,
 }: AdminSidebarProps) {
   const NavButton = ({ id, label, icon: Icon }: typeof navItems[0]) => {
     const isActive = currentPage === id
@@ -216,6 +218,8 @@ export function AdminSidebar({
               "h-8 w-8 shrink-0 transition-all duration-300",
               collapsed ? "w-0 opacity-0 overflow-hidden" : "w-8 opacity-100"
             )}
+            onClick={onLogout}
+            title="Sign out"
           >
             <LogOut className="h-4 w-4" />
           </Button>

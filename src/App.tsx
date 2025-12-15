@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AdminSidebar } from '@/components/AdminSidebar'
 import { AdminHeader } from '@/components/AdminHeader'
+import { LoginPage } from '@/pages/LoginPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { RosterPage } from '@/pages/RosterPage'
 import { SessionsPage } from '@/pages/SessionsPage'
@@ -14,6 +15,18 @@ import { NavPage } from '@/types'
 import { cn } from '@/lib/utils'
 
 export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('isLoggedIn') === 'true'
+    }
+    return false
+  })
+  const [lastSyncTime] = useState<Date>(() => {
+    // Simulate last nightly sync at 3:00 AM today
+    const today = new Date()
+    today.setHours(3, 0, 0, 0)
+    return today
+  })
   const [currentPage, setCurrentPage] = useState<NavPage>('dashboard')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -31,6 +44,17 @@ export default function App() {
     document.documentElement.classList.toggle('dark', darkMode)
     localStorage.setItem('darkMode', String(darkMode))
   }, [darkMode])
+
+  const handleLogin = () => {
+    setIsLoggedIn(true)
+    localStorage.setItem('isLoggedIn', 'true')
+  }
+
+  const handleLogout = () => {
+    setIsLoggedIn(false)
+    localStorage.removeItem('isLoggedIn')
+    setCurrentPage('dashboard')
+  }
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type })
@@ -51,7 +75,7 @@ export default function App() {
       case 'sessions':
         return <SessionsPage showToast={showToast} />
       case 'attendance':
-        return <AttendancePage showToast={showToast} />
+        return <AttendancePage showToast={showToast} lastSyncTime={lastSyncTime} />
       case 'email':
         return <EmailPage showToast={showToast} />
       case 'analytics':
@@ -59,6 +83,11 @@ export default function App() {
       default:
         return <DashboardPage onNavigate={setCurrentPage} showToast={showToast} />
     }
+  }
+
+  // Show login page if not logged in
+  if (!isLoggedIn) {
+    return <LoginPage onLogin={handleLogin} />
   }
 
   return (
@@ -79,6 +108,7 @@ export default function App() {
           onClose={() => setSidebarOpen(false)}
           darkMode={darkMode}
           onToggleDarkMode={toggleDarkMode}
+          onLogout={handleLogout}
         />
 
         <div className="flex flex-col overflow-hidden">
@@ -87,6 +117,7 @@ export default function App() {
             onMenuClick={() => setSidebarOpen(true)}
             darkMode={darkMode}
             onToggleDarkMode={toggleDarkMode}
+            lastSyncTime={lastSyncTime}
           />
           
           <main className="flex-1 overflow-y-auto bg-background p-6 pb-24 lg:pb-6">
@@ -108,3 +139,4 @@ export default function App() {
     </TooltipProvider>
   )
 }
+

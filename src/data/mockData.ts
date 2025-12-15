@@ -110,11 +110,33 @@ export const mockSessions: Session[] = [
     id: 'session-3',
     name: 'Module 3: Advanced Topics',
     cohortId: 'cohort-1',
-    date: new Date(),
-    startTime: '09:00',
-    endTime: '12:00',
+    date: new Date(), // Today
+    startTime: '14:00',
+    endTime: '17:00',
     zoomMeetingId: '123 456 7892',
     zoomLink: 'https://zoom.us/j/1234567892',
+    status: 'scheduled',
+  },
+  {
+    id: 'session-4',
+    name: 'Module 4: Practical Workshop',
+    cohortId: 'cohort-1',
+    date: new Date(Date.now() + 24 * 60 * 60 * 1000), // Tomorrow
+    startTime: '09:00',
+    endTime: '12:00',
+    zoomMeetingId: '123 456 7893',
+    zoomLink: 'https://zoom.us/j/1234567893',
+    status: 'scheduled',
+  },
+  {
+    id: 'session-5',
+    name: 'Module 5: Project Review',
+    cohortId: 'cohort-1',
+    date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Next week
+    startTime: '09:00',
+    endTime: '12:00',
+    zoomMeetingId: '123 456 7894',
+    zoomLink: 'https://zoom.us/j/1234567894',
     status: 'scheduled',
   },
 ]

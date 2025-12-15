@@ -15,9 +15,10 @@ import { cn } from '@/lib/utils'
 
 interface AttendancePageProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void
+  lastSyncTime?: Date
 }
 
-export function AttendancePage({ showToast }: AttendancePageProps) {
+export function AttendancePage({ showToast, lastSyncTime }: AttendancePageProps) {
   const [syncing, setSyncing] = useState(false)
   const [selectedSession, setSelectedSession] = useState(mockSessions[0]?.id)
 
@@ -45,6 +46,11 @@ export function AttendancePage({ showToast }: AttendancePageProps) {
     return record?.status || null
   }
 
+  const formatSyncTime = (date: Date) => {
+    const timeStr = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    return timeStr
+  }
+
   const statusConfig = {
     present: { icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-100', label: 'Present' },
     late: { icon: Clock, color: 'text-amber-500', bg: 'bg-amber-100', label: 'Late' },
@@ -67,6 +73,23 @@ export function AttendancePage({ showToast }: AttendancePageProps) {
           {syncing ? 'Syncing...' : 'Sync from Zoom'}
         </Button>
       </div>
+
+      {/* Nightly Sync Info */}
+      {lastSyncTime && (
+        <Card className="border-emerald-200 bg-gradient-to-r from-emerald-50 to-transparent dark:border-emerald-900 dark:from-emerald-950">
+          <CardContent className="flex items-center gap-4 p-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900">
+              <RefreshCw className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <div>
+              <p className="font-medium text-emerald-700 dark:text-emerald-400">Nightly Zoom Sync Active</p>
+              <p className="text-sm text-emerald-600 dark:text-emerald-500">
+                Attendance is automatically synced at {formatSyncTime(lastSyncTime)} every night
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Cards */}
       <div className="grid gap-4 sm:grid-cols-3">

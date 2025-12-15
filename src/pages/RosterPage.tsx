@@ -10,7 +10,9 @@ import {
   Trash2,
   UserCheck,
   UserX,
-  Filter
+  Filter,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -33,6 +35,9 @@ interface RosterPageProps {
 export function RosterPage({ showToast }: RosterPageProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set())
+  const [sortBy, setSortBy] = useState<'name' | 'attendance'>('name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
   const filteredStudents = mockStudents.filter((student) => {
     const matchesSearch = 
@@ -52,6 +57,56 @@ export function RosterPage({ showToast }: RosterPageProps) {
 
   const handleBulkImport = () => {
     showToast('Bulk Import modal coming soon!', 'info')
+  }
+
+  const handleSelectAll = () => {
+    if (selectedStudents.size === filteredStudents.length) {
+      setSelectedStudents(new Set())
+    } else {
+      setSelectedStudents(new Set(filteredStudents.map(s => s.id)))
+    }
+  }
+
+  const handleSelectStudent = (id: string) => {
+    const newSelected = new Set(selectedStudents)
+    if (newSelected.has(id)) {
+      newSelected.delete(id)
+    } else {
+      newSelected.add(id)
+    }
+    setSelectedStudents(newSelected)
+  }
+
+  const handleBulkEmail = () => {
+    showToast(`Sending email to ${selectedStudents.size} students...`, 'info')
+  }
+
+  const handleSort = (column: 'name' | 'attendance') => {
+    if (sortBy === column) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(column)
+      setSortDir('asc')
+    }
+  }
+
+  const sortedStudents = [...filteredStudents].sort((a, b) => {
+    if (sortBy === 'name') {
+      return sortDir === 'asc' 
+        ? a.name.localeCompare(b.name)
+        : b.name.localeCompare(a.name)
+    } else {
+      return sortDir === 'asc'
+        ? a.attendanceRate - b.attendanceRate
+        : b.attendanceRate - a.attendanceRate
+    }
+  })
+
+  const SortIcon = ({ column }: { column: 'name' | 'attendance' }) => {
+    if (sortBy !== column) return null
+    return sortDir === 'asc' 
+      ? <ChevronUp className="h-3 w-3" />
+      : <ChevronDown className="h-3 w-3" />
   }
 
   return (
@@ -109,6 +164,26 @@ export function RosterPage({ showToast }: RosterPageProps) {
         </CardContent>
       </Card>
 
+      {/* Bulk Action Bar */}
+      {selectedStudents.size > 0 && (
+        <Card className="border-primary/50 bg-primary/5">
+          <CardContent className="flex items-center justify-between p-3">
+            <span className="text-sm font-medium">
+              {selectedStudents.size} student{selectedStudents.size > 1 ? 's' : ''} selected
+            </span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={handleBulkEmail}>
+                <Mail className="mr-1 h-3 w-3" />
+                Email Selected
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelectedStudents(new Set())}>
+                Clear
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Students List */}
       <Card>
         <CardHeader className="pb-3">
@@ -117,10 +192,24 @@ export function RosterPage({ showToast }: RosterPageProps) {
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead>
+              <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Student
+                  <th className="w-10 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedStudents.size === sortedStudents.length && sortedStudents.length > 0}
+                      onChange={handleSelectAll}
+                      className="h-4 w-4 rounded border-gray-300 accent-primary"
+                    />
+                  </th>
+                  <th 
+                    className="cursor-pointer px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                    onClick={() => handleSort('name')}
+                  >
+                    <span className="flex items-center gap-1">
+                      Student
+                      <SortIcon column="name" />
+                    </span>
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     Cohort
@@ -128,8 +217,14 @@ export function RosterPage({ showToast }: RosterPageProps) {
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     Status
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Attendance
+                  <th 
+                    className="cursor-pointer px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                    onClick={() => handleSort('attendance')}
+                  >
+                    <span className="flex items-center gap-1">
+                      Attendance
+                      <SortIcon column="attendance" />
+                    </span>
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     Actions
@@ -137,12 +232,14 @@ export function RosterPage({ showToast }: RosterPageProps) {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filteredStudents.map((student) => (
+                {sortedStudents.map((student) => (
                   <StudentRow 
                     key={student.id} 
                     student={student} 
                     cohortName={getCohortName(student.cohortId)}
                     showToast={showToast}
+                    isSelected={selectedStudents.has(student.id)}
+                    onSelect={() => handleSelectStudent(student.id)}
                   />
                 ))}
               </tbody>
@@ -163,11 +260,15 @@ export function RosterPage({ showToast }: RosterPageProps) {
 function StudentRow({ 
   student, 
   cohortName,
-  showToast 
+  showToast,
+  isSelected,
+  onSelect
 }: { 
   student: Student
   cohortName: string
-  showToast: (message: string, type: 'success' | 'error' | 'info') => void 
+  showToast: (message: string, type: 'success' | 'error' | 'info') => void
+  isSelected: boolean
+  onSelect: () => void
 }) {
   const statusColors = {
     active: 'bg-emerald-100 text-emerald-700',
@@ -177,7 +278,15 @@ function StudentRow({
   }
 
   return (
-    <tr className="hover:bg-muted/50 transition-colors">
+    <tr className={cn("hover:bg-muted/50 transition-colors", isSelected && "bg-primary/5")}>
+      <td className="w-10 px-4 py-3">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={onSelect}
+          className="h-4 w-4 rounded border-gray-300 accent-primary"
+        />
+      </td>
       <td className="px-4 py-3">
         <div className="flex items-center gap-3">
           <div className={cn(

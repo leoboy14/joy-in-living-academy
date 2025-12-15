@@ -4,9 +4,11 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
-  XCircle
+  XCircle,
+  Download
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { mockStudents, mockCohorts, mockSessions, mockAttendance } from '@/data/mockData'
 import { cn } from '@/lib/utils'
 
@@ -14,7 +16,7 @@ interface AnalyticsPageProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void
 }
 
-export function AnalyticsPage(_props: AnalyticsPageProps) {
+export function AnalyticsPage({ showToast }: AnalyticsPageProps) {
   const activeCohort = mockCohorts.find(c => c.status === 'active')
   const cohortStudents = mockStudents.filter(s => s.cohortId === activeCohort?.id)
   
@@ -36,8 +38,50 @@ export function AnalyticsPage(_props: AnalyticsPageProps) {
   const needsImprovement = cohortStudents.filter(s => s.attendanceRate >= 50 && s.attendanceRate < 75).length
   const critical = cohortStudents.filter(s => s.attendanceRate < 50).length
 
+  const handleExportCSV = () => {
+    // Generate CSV content
+    const headers = ['Rank', 'Name', 'Email', 'Cohort', 'Attendance Rate', 'Status']
+    const rows = [...cohortStudents]
+      .sort((a, b) => b.attendanceRate - a.attendanceRate)
+      .map((student, index) => [
+        index + 1,
+        student.name,
+        student.email,
+        activeCohort?.name || 'Unknown',
+        `${student.attendanceRate}%`,
+        student.status
+      ])
+    
+    const csvContent = [headers.join(','), ...rows.map(row => row.join(','))].join('\n')
+    
+    // Create download
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `attendance_report_${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    window.URL.revokeObjectURL(url)
+    
+    showToast('CSV report downloaded!', 'success')
+  }
+
   return (
     <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Attendance Analytics</h2>
+          <p className="text-sm text-muted-foreground">
+            View attendance reports and export data
+          </p>
+        </div>
+        <Button onClick={handleExportCSV}>
+          <Download className="mr-2 h-4 w-4" />
+          Export CSV
+        </Button>
+      </div>
+
       {/* Overview Stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
