@@ -13,7 +13,8 @@ import {
   Moon,
   Sun,
   LogOut,
-  User
+  User,
+  Video
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -169,6 +170,7 @@ export function AdminSidebar({
         <Separator className="my-3" />
         
         <NavButton id="settings" label="Settings" icon={Settings} />
+        <NavButton id="recordings" label="Recordings" icon={Video} />
       </nav>
 
       {/* Footer */}

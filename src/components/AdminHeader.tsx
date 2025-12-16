@@ -19,6 +19,7 @@ const pageTitles: Record<NavPage, { title: string; description: string }> = {
   email: { title: 'Email Blast', description: 'Send announcements to students' },
   analytics: { title: 'Analytics', description: 'View attendance reports' },
   settings: { title: 'Settings', description: 'Configure your account' },
+  recordings: { title: 'Recordings', description: 'Session recordings archive' },
 }
 
 export function AdminHeader({ currentPage, onMenuClick, darkMode, onToggleDarkMode, lastSyncTime }: AdminHeaderProps) {

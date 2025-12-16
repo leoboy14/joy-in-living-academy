@@ -9,6 +9,7 @@ import { SessionsPage } from '@/pages/SessionsPage'
 import { AttendancePage } from '@/pages/AttendancePage'
 import { EmailPage } from '@/pages/EmailPage'
 import { AnalyticsPage } from '@/pages/AnalyticsPage'
+import { RecordingsPage } from '@/pages/RecordingsPage'
 import { Toast } from '@/components/Toast'
 import { MobileNav } from '@/components/MobileNav'
 import { NavPage } from '@/types'
@@ -80,6 +81,8 @@ export default function App() {
         return <EmailPage showToast={showToast} />
       case 'analytics':
         return <AnalyticsPage showToast={showToast} />
+      case 'recordings':
+        return <RecordingsPage showToast={showToast} />
       default:
         return <DashboardPage onNavigate={setCurrentPage} showToast={showToast} />
     }

@@ -99,6 +99,7 @@ export type NavPage =
   | 'email'
   | 'analytics'
   | 'settings'
+  | 'recordings'
 
 // Filter Types
 export interface FilterOptions {
