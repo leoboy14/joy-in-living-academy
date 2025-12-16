@@ -265,7 +265,7 @@ export function RecordingsPage({ showToast }: RecordingsPageProps) {
           />
         </div>
         <div className="flex gap-2">
-          <Select value={statusFilter} onValueChange={(v: 'all' | 'active' | 'archived') => setStatusFilter(v)}>
+          <Select value={statusFilter} onValueChange={(v: string) => setStatusFilter(v as 'all' | 'active' | 'archived')}>
             <SelectTrigger className="w-[140px]">
               <Filter className="h-4 w-4 mr-2" />
               <SelectValue placeholder="Status" />
