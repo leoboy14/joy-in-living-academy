@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { 
   Users, 
   GraduationCap, 
@@ -9,13 +10,15 @@ import {
   BarChart3,
   Video,
   Copy,
-  ExternalLink
+  ExternalLink,
+  Loader2
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { mockDashboardStats, mockSessions, mockCohorts } from '@/data/mockData'
-import { NavPage } from '@/types'
+import { NavPage, DashboardStats, Session, Cohort } from '@/types'
 import { cn } from '@/lib/utils'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 
 interface DashboardPageProps {
   onNavigate: (page: NavPage) => void
@@ -23,9 +26,73 @@ interface DashboardPageProps {
 }
 
 export function DashboardPage({ onNavigate, showToast }: DashboardPageProps) {
-  const stats = mockDashboardStats
-  const upcomingSessions = mockSessions.filter(s => s.status === 'scheduled')
-  const activeCohorts = mockCohorts.filter(c => c.status === 'active')
+  const [loading, setLoading] = useState(true)
+  const [stats, setStats] = useState<DashboardStats>(mockDashboardStats)
+  const [upcomingSessions, setUpcomingSessions] = useState<Session[]>([])
+  const [activeCohorts, setActiveCohorts] = useState<Cohort[]>([])
+
+  useEffect(() => {
+    async function fetchDashboardData() {
+      try {
+        setLoading(true)
+        if (!isSupabaseConfigured) {
+          console.warn('Supabase credentials missing. Using mock data.')
+          setUpcomingSessions(mockSessions.filter(s => s.status === 'scheduled'))
+          setActiveCohorts(mockCohorts.filter(c => c.status === 'active'))
+          return
+        }
+
+        // Fetch Stats and Data in parallel
+        const [
+          { count: studentCount },
+          { data: cohortsData },
+          { data: sessionsData },
+          { data: attendanceData }
+        ] = await Promise.all([
+          supabase.from('students').select('*', { count: 'exact', head: true }),
+          supabase.from('cohorts').select('*'),
+          supabase.from('sessions').select('*').order('date', { ascending: true }),
+          supabase.from('attendance').select('status')
+        ])
+
+        // Process Stats
+        const activeCohortsList = (cohortsData || []).filter(c => c.status === 'active')
+        const upcomingSessionsList = (sessionsData || []).filter(s => {
+          const sDate = new Date(s.date)
+          sDate.setHours(0,0,0,0)
+          const today = new Date()
+          today.setHours(0,0,0,0)
+          return s.status === 'scheduled' && sDate >= today
+        })
+
+        // Calculate avg attendance (rough estimate from all attendance records)
+        const totalAttendance = attendanceData?.length || 0
+        const presentCount = attendanceData?.filter(a => a.status === 'present' || a.status === 'late').length || 0
+        const avgAttendance = totalAttendance > 0 ? Math.round((presentCount / totalAttendance) * 100) : 78
+
+        setStats({
+          totalStudents: studentCount || 0,
+          activeStudents: (cohortsData || []).reduce((acc, c) => acc + (c.status === 'active' ? c.studentCount : 0), 0),
+          totalCohorts: cohortsData?.length || 0,
+          activeCohorts: activeCohortsList.length,
+          upcomingSessions: upcomingSessionsList.length,
+          averageAttendanceRate: avgAttendance
+        })
+
+        setUpcomingSessions(upcomingSessionsList.slice(0, 5))
+        setActiveCohorts(activeCohortsList)
+
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error)
+        showToast('Failed to fetch live dashboard data.', 'error')
+        // Fallback already handled by initial state
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchDashboardData()
+  }, [])
 
   const statCards = [
     { 
@@ -83,7 +150,13 @@ export function DashboardPage({ onNavigate, showToast }: DashboardPageProps) {
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-xs font-medium opacity-90">{label}</p>
-                  <p className="mt-1 text-2xl font-bold">{value}</p>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    {loading ? (
+                      <Loader2 className="h-5 w-5 animate-spin opacity-50" />
+                    ) : (
+                      <p className="text-2xl font-bold">{value}</p>
+                    )}
+                  </div>
                 </div>
                 <div className="rounded-lg bg-white/20 p-2">
                   <Icon className="h-4 w-4" />
@@ -129,7 +202,11 @@ export function DashboardPage({ onNavigate, showToast }: DashboardPageProps) {
             </Button>
           </CardHeader>
           <CardContent>
-            {upcomingSessions.length === 0 ? (
+            {loading ? (
+              <div className="flex h-40 items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
+              </div>
+            ) : upcomingSessions.length === 0 ? (
               <p className="text-sm text-muted-foreground">No upcoming sessions</p>
             ) : (
               <div className="space-y-3">
@@ -219,7 +296,11 @@ export function DashboardPage({ onNavigate, showToast }: DashboardPageProps) {
             </Button>
           </CardHeader>
           <CardContent>
-            {activeCohorts.length === 0 ? (
+            {loading ? (
+              <div className="flex h-40 items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
+              </div>
+            ) : activeCohorts.length === 0 ? (
               <p className="text-sm text-muted-foreground">No active cohorts</p>
             ) : (
               <div className="space-y-3">
@@ -234,7 +315,6 @@ export function DashboardPage({ onNavigate, showToast }: DashboardPageProps) {
                       </div>
                       <div>
                         <p className="font-medium">{cohort.name}</p>
-                        <p className="text-xs text-muted-foreground">{cohort.code}</p>
                       </div>
                     </div>
                     <div className="text-right">

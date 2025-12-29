@@ -5,8 +5,8 @@ import { Student, Cohort, Session, AttendanceRecord, DashboardStats } from '@/ty
 export const mockCohorts: Cohort[] = [
   {
     id: 'cohort-1',
-    name: 'SCTP3 Batch 046',
-    code: 'SCTP3-046',
+    name: 'Cohort 1',
+    code: 'C1',
     startDate: new Date('2025-01-15'),
     endDate: new Date('2025-06-15'),
     studentCount: 25,
@@ -14,8 +14,8 @@ export const mockCohorts: Cohort[] = [
   },
   {
     id: 'cohort-2',
-    name: 'SCTP3 Batch 045',
-    code: 'SCTP3-045',
+    name: 'Cohort 2',
+    code: 'C2',
     startDate: new Date('2024-07-01'),
     endDate: new Date('2024-12-31'),
     studentCount: 28,
@@ -23,8 +23,8 @@ export const mockCohorts: Cohort[] = [
   },
   {
     id: 'cohort-3',
-    name: 'SCTP3 Batch 047',
-    code: 'SCTP3-047',
+    name: 'Cohort 3',
+    code: 'C3',
     startDate: new Date('2025-07-01'),
     endDate: new Date('2025-12-31'),
     studentCount: 0,

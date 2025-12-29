@@ -10,8 +10,11 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { mockSessions, mockStudents, mockAttendance, mockCohorts } from '@/data/mockData'
-import { AttendanceStatus } from '@/types'
+import { AttendanceStatus, Session, Student, AttendanceRecord, Cohort } from '@/types'
 import { cn } from '@/lib/utils'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { Loader2 } from 'lucide-react'
+import { useEffect } from 'react'
 
 interface AttendancePageProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void
@@ -19,13 +22,74 @@ interface AttendancePageProps {
 }
 
 export function AttendancePage({ showToast, lastSyncTime }: AttendancePageProps) {
+  const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
-  const [selectedSession, setSelectedSession] = useState(mockSessions[0]?.id)
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [students, setStudents] = useState<Student[]>([])
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([])
+  const [cohorts, setCohorts] = useState<Cohort[]>([])
+  const [selectedSession, setSelectedSession] = useState<string>('')
 
-  const activeCohort = mockCohorts.find(c => c.status === 'active')
-  const cohortStudents = mockStudents.filter(s => s.cohortId === activeCohort?.id)
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  const fetchData = async () => {
+    try {
+      setLoading(true)
+      if (!isSupabaseConfigured) {
+        setSessions(mockSessions)
+        setStudents(mockStudents)
+        setAttendance(mockAttendance as any)
+        setCohorts(mockCohorts)
+        if (mockSessions.length > 0) setSelectedSession(mockSessions[0].id)
+        return
+      }
+
+      const [
+        { data: sData, error: sError },
+        { data: stData, error: stError },
+        { data: aData, error: aError },
+        { data: cData, error: cError }
+      ] = await Promise.all([
+        supabase.from('sessions').select('*').order('date', { ascending: false }),
+        supabase.from('students').select('*'),
+        supabase.from('attendance').select('*'),
+        supabase.from('cohorts').select('*')
+      ])
+
+      if (sError) throw sError
+      if (stError) throw stError
+      if (aError) throw aError
+      if (cError) throw cError
+
+      if (sData) {
+        const transformed = sData.map((s: any) => ({ ...s, date: new Date(s.date) }))
+        setSessions(transformed)
+        if (transformed.length > 0 && !selectedSession) setSelectedSession(transformed[0].id)
+      }
+      if (stData) {
+        const transformed = stData.map((s: any) => ({ ...s, enrolledAt: new Date(s.enrolledAt) }))
+        setStudents(transformed)
+      }
+      if (aData) {
+        const transformed = aData.map((a: any) => ({ ...a, syncedAt: new Date(a.syncedAt), checkInTime: a.checkInTime ? new Date(a.checkInTime) : undefined }))
+        setAttendance(transformed)
+      }
+      if (cData) setCohorts(cData)
+
+    } catch (error) {
+      console.error('Error fetching attendance data:', error)
+      showToast('Failed to fetch attendance data.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const activeCohort = cohorts.find(c => c.status === 'active')
+  const cohortStudents = students.filter(s => s.cohortId === activeCohort?.id)
   
-  const sessionAttendance = mockAttendance.filter(a => a.sessionId === selectedSession)
+  const sessionAttendance = attendance.filter(a => a.sessionId === selectedSession)
   
   const stats = {
     present: sessionAttendance.filter(a => a.status === 'present').length,
@@ -92,43 +156,49 @@ export function AttendancePage({ showToast, lastSyncTime }: AttendancePageProps)
       )}
 
       {/* Stats Cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardContent className="flex items-center gap-4 p-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-100">
-              <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.present}</p>
-              <p className="text-sm text-muted-foreground">Present</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="flex items-center gap-4 p-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
-              <Clock className="h-6 w-6 text-amber-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.late}</p>
-              <p className="text-sm text-muted-foreground">Late</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="flex items-center gap-4 p-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-100">
-              <XCircle className="h-6 w-6 text-red-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{stats.absent}</p>
-              <p className="text-sm text-muted-foreground">Absent</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {loading ? (
+        <div className="flex h-32 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Card>
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-100">
+                <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{stats.present}</p>
+                <p className="text-sm text-muted-foreground">Present</p>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
+                <Clock className="h-6 w-6 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{stats.late}</p>
+                <p className="text-sm text-muted-foreground">Late</p>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-100">
+                <XCircle className="h-6 w-6 text-red-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{stats.absent}</p>
+                <p className="text-sm text-muted-foreground">Absent</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Session Selector */}
       <Card>
@@ -138,7 +208,7 @@ export function AttendancePage({ showToast, lastSyncTime }: AttendancePageProps)
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-2">
-            {mockSessions.map((session) => (
+            {sessions.map((session) => (
               <Button
                 key={session.id}
                 variant={selectedSession === session.id ? 'default' : 'outline'}

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Lock, Mail, Eye, EyeOff, GraduationCap } from 'lucide-react'
+import { Lock, Mail, Eye, EyeOff, GraduationCap, Video } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,9 +7,10 @@ import { cn } from '@/lib/utils'
 
 interface LoginPageProps {
   onLogin: () => void
+  onPublicAccess: () => void
 }
 
-export function LoginPage({ onLogin }: LoginPageProps) {
+export function LoginPage({ onLogin, onPublicAccess }: LoginPageProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -130,6 +131,27 @@ export function LoginPage({ onLogin }: LoginPageProps) {
             <p className="text-center text-xs text-muted-foreground pt-2">
               Demo: Use any email and password to login
             </p>
+
+            <div className="relative py-4">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">
+                  Student Portal
+                </span>
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-primary/20 hover:bg-primary/5 gap-2"
+              onClick={onPublicAccess}
+            >
+              <Video className="h-4 w-4" />
+              Access Cohort Archives
+            </Button>
           </form>
         </CardContent>
       </Card>

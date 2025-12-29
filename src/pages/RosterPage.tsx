@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { 
   Plus, 
   Search, 
@@ -12,7 +12,9 @@ import {
   UserX,
   Filter,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  X,
+  Loader2
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -25,8 +27,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { mockStudents, mockCohorts } from '@/data/mockData'
-import { Student } from '@/types'
+import { Student, Cohort } from '@/types'
 import { cn } from '@/lib/utils'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select'
 
 interface RosterPageProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void
@@ -39,7 +49,53 @@ export function RosterPage({ showToast }: RosterPageProps) {
   const [sortBy, setSortBy] = useState<'name' | 'attendance'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
-  const filteredStudents = mockStudents.filter((student) => {
+  const [loading, setLoading] = useState(true)
+  const [students, setStudents] = useState<Student[]>([])
+  const [cohorts, setCohorts] = useState<Cohort[]>([])
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null)
+
+  // Fetch students from Supabase
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  const fetchData = async () => {
+    try {
+      setLoading(true)
+      if (!isSupabaseConfigured) {
+        setStudents(mockStudents)
+        setCohorts(mockCohorts)
+        return
+      }
+
+      const [{ data: sData, error: sError }, { data: cData, error: cError }] = await Promise.all([
+        supabase.from('students').select('*'),
+        supabase.from('cohorts').select('*')
+      ])
+      
+      if (sError) throw sError
+      if (cError) throw cError
+
+      if (cData) setCohorts(cData)
+
+      if (sData) {
+        const transformed: Student[] = sData.map((s: any) => ({
+          ...s,
+          enrolledAt: new Date(s.enrolledAt),
+          status: s.status as Student['status']
+        }))
+        setStudents(transformed)
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error)
+      showToast('Failed to fetch data.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const filteredStudents = students.filter((student) => {
     const matchesSearch = 
       student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       student.email.toLowerCase().includes(searchQuery.toLowerCase())
@@ -48,11 +104,17 @@ export function RosterPage({ showToast }: RosterPageProps) {
   })
 
   const getCohortName = (cohortId: string) => {
-    return mockCohorts.find(c => c.id === cohortId)?.name || 'Unknown'
+    return cohorts.find(c => c.id === cohortId)?.name || 'Unknown'
   }
 
   const handleAddStudent = () => {
-    showToast('Add Student modal coming soon!', 'info')
+    setEditingStudent(null)
+    setIsModalOpen(true)
+  }
+
+  const handleEditStudent = (student: Student) => {
+    setEditingStudent(student)
+    setIsModalOpen(true)
   }
 
   const handleBulkImport = () => {
@@ -232,7 +294,16 @@ export function RosterPage({ showToast }: RosterPageProps) {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {sortedStudents.map((student) => (
+                {loading ? (
+                  <tr>
+                    <td colSpan={6} className="h-24 text-center">
+                      <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                        Loading students...
+                      </div>
+                    </td>
+                  </tr>
+                ) : sortedStudents.map((student) => (
                   <StudentRow 
                     key={student.id} 
                     student={student} 
@@ -240,6 +311,7 @@ export function RosterPage({ showToast }: RosterPageProps) {
                     showToast={showToast}
                     isSelected={selectedStudents.has(student.id)}
                     onSelect={() => handleSelectStudent(student.id)}
+                    onEdit={() => handleEditStudent(student)}
                   />
                 ))}
               </tbody>
@@ -253,6 +325,229 @@ export function RosterPage({ showToast }: RosterPageProps) {
           )}
         </CardContent>
       </Card>
+
+      {/* Student Modal (Add/Edit) */}
+      {isModalOpen && (
+        <StudentModal 
+          cohorts={cohorts}
+          student={editingStudent || undefined}
+          onClose={() => {
+            setIsModalOpen(false)
+            setEditingStudent(null)
+          }}
+          onSuccess={() => {
+            setIsModalOpen(false)
+            setEditingStudent(null)
+            fetchData()
+          }}
+          showToast={showToast}
+        />
+      )}
+    </div>
+  )
+}
+
+interface StudentModalProps {
+  cohorts: Cohort[]
+  student?: Student
+  onClose: () => void
+  onSuccess: () => void
+  showToast: (message: string, type: 'success' | 'error' | 'info') => void
+}
+
+function StudentModal({ cohorts, student, onClose, onSuccess, showToast }: StudentModalProps) {
+  const isEdit = !!student
+  const [submitting, setSubmitting] = useState(false)
+  const [formData, setFormData] = useState({
+    name: student?.name || '',
+    email: student?.email || '',
+    phone: student?.phone || '',
+    cohortId: student?.cohortId || 'cohort-1',
+    status: student?.status || 'active'
+  })
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!formData.name || !formData.email) {
+      showToast('Name and email are required', 'error')
+      return
+    }
+
+    try {
+      setSubmitting(true)
+      
+      if (isEdit) {
+        // 1. Update student
+        const { error: updateError } = await supabase
+          .from('students')
+          .update({
+            name: formData.name,
+            email: formData.email,
+            phone: formData.phone || null,
+            cohortId: formData.cohortId,
+            status: formData.status,
+          })
+          .eq('id', student.id)
+
+        if (updateError) throw updateError
+
+        // 2. If cohort changed, update counts for BOTH cohorts
+        if (student.cohortId !== formData.cohortId) {
+          const updateCohortCount = async (cid: string) => {
+            const { count } = await supabase
+              .from('students')
+              .select('*', { count: 'exact', head: true })
+              .eq('cohortId', cid)
+            
+            await supabase
+              .from('cohorts')
+              .update({ studentCount: count || 0 })
+              .eq('id', cid)
+          }
+
+          await Promise.all([
+            updateCohortCount(student.cohortId),
+            updateCohortCount(formData.cohortId)
+          ])
+        }
+
+        showToast('Student updated successfully!', 'success')
+      } else {
+        // Create new
+        const studentId = `student-${Date.now()}`
+        const { error: insertError } = await supabase
+          .from('students')
+          .insert({
+            id: studentId,
+            name: formData.name,
+            email: formData.email,
+            phone: formData.phone || null,
+            cohortId: formData.cohortId,
+            status: formData.status,
+            enrolledAt: new Date().toISOString()
+          })
+
+        if (insertError) throw insertError
+
+        // Update cohort count
+        const { count } = await supabase
+          .from('students')
+          .select('*', { count: 'exact', head: true })
+          .eq('cohortId', formData.cohortId)
+
+        await supabase
+          .from('cohorts')
+          .update({ studentCount: count || 0 })
+          .eq('id', formData.cohortId)
+
+        showToast('Student added successfully!', 'success')
+      }
+      
+      onSuccess()
+    } catch (error: any) {
+      console.error('Error saving student:', error)
+      showToast(error.message || 'Failed to save student', 'error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 overflow-y-auto">
+      <Card className="w-full max-w-md animate-in zoom-in-95 duration-200 my-8">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardTitle>{isEdit ? 'Edit Student' : 'Add New Student'}</CardTitle>
+          <Button variant="ghost" size="icon" onClick={onClose} disabled={submitting}>
+            <X className="h-4 w-4" />
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Full Name</label>
+              <Input 
+                placeholder="John Doe" 
+                value={formData.name}
+                onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                disabled={submitting}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Email Address</label>
+              <Input 
+                type="email"
+                placeholder="john@example.com" 
+                value={formData.email}
+                onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                disabled={submitting}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Phone Number (Optional)</label>
+              <Input 
+                placeholder="+65 1234 5678" 
+                value={formData.phone}
+                onChange={e => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                disabled={submitting}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Cohort</label>
+                <Select 
+                  value={formData.cohortId} 
+                  onValueChange={v => setFormData(prev => ({ ...prev, cohortId: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select cohort" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cohorts.map(cohort => (
+                      <SelectItem key={cohort.id} value={cohort.id}>
+                        {cohort.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Status</label>
+                <Select 
+                  value={formData.status} 
+                  onValueChange={v => setFormData(prev => ({ ...prev, status: v as any }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="graduated">Graduated</SelectItem>
+                    <SelectItem value="withdrawn">Withdrawn</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="pt-4 flex gap-3">
+              <Button type="button" variant="outline" className="flex-1" onClick={onClose} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button type="submit" className="flex-1" disabled={submitting}>
+                {submitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  isEdit ? 'Update Student' : 'Add Student'
+                )}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -262,13 +557,15 @@ function StudentRow({
   cohortName,
   showToast,
   isSelected,
-  onSelect
+  onSelect,
+  onEdit
 }: { 
   student: Student
   cohortName: string
   showToast: (message: string, type: 'success' | 'error' | 'info') => void
   isSelected: boolean
   onSelect: () => void
+  onEdit: () => void
 }) {
   const statusColors = {
     active: 'bg-emerald-100 text-emerald-700',
@@ -354,7 +651,7 @@ function StudentRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => showToast('Edit student coming soon!', 'info')}>
+            <DropdownMenuItem onClick={onEdit}>
               <Edit className="mr-2 h-4 w-4" />
               Edit
             </DropdownMenuItem>

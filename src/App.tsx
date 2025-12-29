@@ -10,6 +10,7 @@ import { AttendancePage } from '@/pages/AttendancePage'
 import { EmailPage } from '@/pages/EmailPage'
 import { AnalyticsPage } from '@/pages/AnalyticsPage'
 import { RecordingsPage } from '@/pages/RecordingsPage'
+import { PublicArchivesPage } from '@/pages/PublicArchivesPage'
 import { Toast } from '@/components/Toast'
 import { MobileNav } from '@/components/MobileNav'
 import { NavPage } from '@/types'
@@ -29,6 +30,7 @@ export default function App() {
     return today
   })
   const [currentPage, setCurrentPage] = useState<NavPage>('dashboard')
+  const [isPublicView, setIsPublicView] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
@@ -88,9 +90,14 @@ export default function App() {
     }
   }
 
+  // Show public archives view if requested
+  if (isPublicView) {
+    return <PublicArchivesPage showToast={showToast} onExit={() => setIsPublicView(false)} />
+  }
+
   // Show login page if not logged in
   if (!isLoggedIn) {
-    return <LoginPage onLogin={handleLogin} />
+    return <LoginPage onLogin={handleLogin} onPublicAccess={() => setIsPublicView(true)} />
   }
 
   return (

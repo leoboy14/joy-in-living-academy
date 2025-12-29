@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { 
   Plus, 
   Calendar,
@@ -11,7 +11,8 @@ import {
   ExternalLink,
   CheckCircle2,
   XCircle,
-  PlayCircle
+  PlayCircle,
+  X
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -22,9 +23,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
 import { mockSessions, mockCohorts } from '@/data/mockData'
-import { Session } from '@/types'
+import { Session, Cohort } from '@/types'
 import { cn } from '@/lib/utils'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { Loader2 } from 'lucide-react'
 
 interface SessionsPageProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void
@@ -32,18 +37,127 @@ interface SessionsPageProps {
 
 export function SessionsPage({ showToast }: SessionsPageProps) {
   const [filter, setFilter] = useState<'all' | 'scheduled' | 'completed'>('all')
+  const [loading, setLoading] = useState(true)
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [cohorts, setCohorts] = useState<Cohort[]>([])
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
 
-  const filteredSessions = mockSessions.filter((session) => {
+  // Form states
+  const [newName, setNewName] = useState('')
+  const [selectedCohortId, setSelectedCohortId] = useState('')
+  const [sessionDate, setSessionDate] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [duration, setDuration] = useState('60')
+
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  const fetchData = async () => {
+    try {
+      setLoading(true)
+      if (!isSupabaseConfigured) {
+        setSessions(mockSessions)
+        setCohorts(mockCohorts)
+        return
+      }
+
+      const [{ data: sData, error: sError }, { data: cData, error: cError }] = await Promise.all([
+        supabase.from('sessions').select('*').order('date', { ascending: true }),
+        supabase.from('cohorts').select('*')
+      ])
+
+      if (sError) throw sError
+      if (cError) throw cError
+
+      if (cData) setCohorts(cData)
+      if (sData) {
+        const transformed: Session[] = sData.map((s: any) => ({
+          ...s,
+          date: new Date(s.date)
+        }))
+        setSessions(transformed)
+      }
+    } catch (error) {
+      console.error('Error fetching sessions:', error)
+      showToast('Failed to fetch sessions.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCreateSession = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newName || !selectedCohortId || !sessionDate || !startTime) {
+      showToast('Please fill in all required fields.', 'error')
+      return
+    }
+
+    try {
+      setIsCreating(true)
+
+      // 1. Create Zoom Meeting
+      const startDateTime = `${sessionDate}T${startTime}:00`
+      const { data: zoomData, error: zoomError } = await supabase.functions.invoke('create-zoom-meeting', {
+        body: {
+          topic: newName,
+          start_time: startDateTime,
+          duration: parseInt(duration)
+        }
+      })
+
+      if (zoomError) throw zoomError
+
+      // 2. Save to Supabase
+      const newSession = {
+        name: newName,
+        cohortId: selectedCohortId,
+        date: sessionDate,
+        startTime: startTime,
+        endTime: calculateEndTime(startTime, parseInt(duration)),
+        zoomMeetingId: zoomData.id,
+        zoomLink: zoomData.join_url,
+        status: 'scheduled' as const
+      }
+
+      const { error: insertError } = await supabase.from('sessions').insert([newSession])
+      if (insertError) throw insertError
+
+      showToast('Session created and Zoom meeting scheduled!', 'success')
+      setIsModalOpen(false)
+      resetForm()
+      fetchData()
+    } catch (error: any) {
+      console.error('Error creating session:', error)
+      showToast(error.message || 'Failed to create session.', 'error')
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  const calculateEndTime = (start: string, durationMin: number) => {
+    const [hours, minutes] = start.split(':').map(Number)
+    const date = new Date()
+    date.setHours(hours, minutes + durationMin)
+    return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
+  }
+
+  const resetForm = () => {
+    setNewName('')
+    setSelectedCohortId('')
+    setSessionDate('')
+    setStartTime('')
+    setDuration('60')
+  }
+
+  const filteredSessions = sessions.filter((session) => {
     if (filter === 'all') return true
     return session.status === filter
   })
 
   const getCohortName = (cohortId: string) => {
-    return mockCohorts.find(c => c.id === cohortId)?.name || 'Unknown'
-  }
-
-  const handleCreateSession = () => {
-    showToast('Create Session modal coming soon!', 'info')
+    return cohorts.find(c => c.id === cohortId)?.name || 'Unknown'
   }
 
   const copyZoomLink = (link: string) => {
@@ -62,11 +176,116 @@ export function SessionsPage({ showToast }: SessionsPageProps) {
           </p>
         </div>
         
-        <Button onClick={handleCreateSession}>
+        <Button onClick={() => setIsModalOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Create Session
         </Button>
       </div>
+
+      {/* Create Session Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-200">
+          <Card className="w-full max-w-md shadow-2xl">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <div>
+                <CardTitle className="text-xl">Create New Session</CardTitle>
+                <CardDescription>Setup a new Zoom class session</CardDescription>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setIsModalOpen(false)} disabled={isCreating}>
+                <X className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCreateSession} className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Session Name</label>
+                  <Input 
+                    placeholder="e.g. Intro to Living Academy" 
+                    value={newName}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Cohort</label>
+                  <Select value={selectedCohortId} onValueChange={setSelectedCohortId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a cohort" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {cohorts.map((cohort) => (
+                        <SelectItem key={cohort.id} value={cohort.id}>
+                          {cohort.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Date</label>
+                    <Input 
+                      type="date" 
+                      value={sessionDate}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSessionDate(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Start Time</label>
+                    <Input 
+                      type="time" 
+                      value={startTime}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStartTime(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Duration (minutes)</label>
+                  <Select value={duration} onValueChange={setDuration}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select duration" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="30">30 minutes</SelectItem>
+                      <SelectItem value="45">45 minutes</SelectItem>
+                      <SelectItem value="60">60 minutes</SelectItem>
+                      <SelectItem value="90">90 minutes</SelectItem>
+                      <SelectItem value="120">120 minutes</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    className="flex-1" 
+                    onClick={() => setIsModalOpen(false)}
+                    disabled={isCreating}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" className="flex-1" disabled={isCreating}>
+                    {isCreating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      'Create Session'
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <div className="flex gap-2">
@@ -84,17 +303,23 @@ export function SessionsPage({ showToast }: SessionsPageProps) {
       </div>
 
       {/* Sessions Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {filteredSessions.map((session) => (
-          <SessionCard 
-            key={session.id}
-            session={session}
-            cohortName={getCohortName(session.cohortId)}
-            onCopyLink={copyZoomLink}
-            showToast={showToast}
-          />
-        ))}
-      </div>
+      {loading ? (
+        <div className="flex h-60 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {filteredSessions.map((session) => (
+            <SessionCard 
+              key={session.id}
+              session={session}
+              cohortName={getCohortName(session.cohortId)}
+              onCopyLink={copyZoomLink}
+              showToast={showToast}
+            />
+          ))}
+        </div>
+      )}
 
       {filteredSessions.length === 0 && (
         <Card className="border-dashed">

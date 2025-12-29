@@ -5,7 +5,10 @@ import {
   Users,
   ChevronDown,
   AtSign,
-  Eye
+  Eye,
+  Search,
+  Loader2,
+  Calendar
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -17,15 +20,34 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { mockCohorts, mockStudents } from '@/data/mockData'
+import { Student, Cohort, Session } from '@/types'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { useEffect } from 'react'
+import { cn } from '@/lib/utils'
 
 interface EmailPageProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void
 }
 
 const templates = [
-  { id: '1', name: 'Welcome Email', variables: ['name', 'cohort'] },
-  { id: '2', name: 'Zoom Link Reminder', variables: ['name', 'link', 'date', 'time'] },
-  { id: '3', name: 'Attendance Warning', variables: ['name', 'rate'] },
+  { 
+    id: '1', 
+    name: 'Welcome Email', 
+    subject: 'Welcome to Joy in Living Academy!',
+    body: 'Hi [Name],\n\nWelcome to the [Cohort]! We are excited to have you with us.\n\nBest regards,\nJoy in Living Academy'
+  },
+  { 
+    id: '2', 
+    name: 'Zoom Link Reminder', 
+    subject: 'Your Zoom Link for [Date]',
+    body: 'Hi [Name],\n\nHere is your Zoom link for the upcoming session:\n\n📅 Date: [Date]\n⏰ Time: [Time]\n🔗 Link: [Link]\n\nPlease join 5 minutes early.\n\nBest regards,\nJoy in Living Academy'
+  },
+  { 
+    id: '3', 
+    name: 'Attendance Warning', 
+    subject: 'Important: Attendance Update',
+    body: 'Hi [Name],\n\nWe noticed your attendance rate is currently at [Rate]. Please let us know if you have any difficulties attending the sessions.\n\nBest regards,\nJoy in Living Academy'
+  },
 ]
 
 const variableList = [
@@ -35,36 +57,137 @@ const variableList = [
   { key: '[Link]', description: 'Zoom meeting link' },
   { key: '[Date]', description: 'Session date' },
   { key: '[Time]', description: 'Session time' },
+  { key: '[Rate]', description: 'Attendance rate' },
 ]
 
 export function EmailPage({ showToast }: EmailPageProps) {
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
-  const [targetType, setTargetType] = useState<'all' | 'cohort'>('all')
+  const [targetType, setTargetType] = useState<'all' | 'cohort' | 'individual'>('all')
   const [selectedCohort, setSelectedCohort] = useState('')
+  const [selectedStudents, setSelectedStudents] = useState<string[]>([])
+  const [studentSearch, setStudentSearch] = useState('')
   const [showPreview, setShowPreview] = useState(false)
+  const [sending, setSending] = useState(false)
+  
+  // Session variables
+  const [zoomLink, setZoomLink] = useState('')
+  const [sessionDate, setSessionDate] = useState('')
+  const [sessionTime, setSessionTime] = useState('')
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null)
+  
+  const [students, setStudents] = useState<Student[]>([])
+  const [cohorts, setCohorts] = useState<Cohort[]>([])
+  const [sessions, setSessions] = useState<Session[]>([])
 
-  const activeStudentCount = mockStudents.filter(s => s.status === 'active').length
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  const fetchData = async () => {
+    try {
+      if (!isSupabaseConfigured) {
+        setStudents(mockStudents)
+        setCohorts(mockCohorts)
+        return
+      }
+
+      const [{ data: stData }, { data: cData }, { data: sessData }] = await Promise.all([
+        supabase.from('students').select('*'),
+        supabase.from('cohorts').select('*'),
+        supabase.from('sessions').select('*').in('status', ['scheduled', 'in-progress']).order('date', { ascending: true })
+      ])
+
+      if (stData) setStudents(stData as any)
+      if (cData) setCohorts(cData as any)
+      if (sessData) setSessions(sessData as any)
+    } catch (error) {
+      console.error('Error fetching email data:', error)
+    }
+  }
+
+  const activeStudentCount = students.filter(s => s.status === 'active').length
   const cohortStudentCount = selectedCohort 
-    ? mockStudents.filter(s => s.cohortId === selectedCohort && s.status === 'active').length
+    ? students.filter(s => s.cohortId === selectedCohort && s.status === 'active').length
     : 0
+  const individualCount = selectedStudents.length
 
-  const recipientCount = targetType === 'all' ? activeStudentCount : cohortStudentCount
+  const recipientCount = targetType === 'all' 
+    ? activeStudentCount 
+    : targetType === 'cohort' 
+      ? cohortStudentCount 
+      : individualCount
 
   const insertVariable = (variable: string) => {
     setBody((prev) => prev + variable)
   }
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!subject.trim() || !body.trim()) {
       showToast('Please fill in subject and message', 'error')
       return
     }
-    showToast(`Email sent to ${recipientCount} students!`, 'success')
-    setSubject('')
-    setBody('')
-  }
 
+    if (recipientCount === 0) {
+      showToast('No recipients selected', 'error')
+      return
+    }
+
+    try {
+      setSending(true)
+      
+      // 1. Get recipient list with personalization data
+      const getRecipientData = (student: Student) => ({
+        email: student.email,
+        name: student.name,
+        cohort: cohorts.find(c => c.id === student.cohortId)?.name || 'Your Cohort',
+        attendanceRate: `${Math.round(student.attendanceRate)}%`
+      })
+
+      let recipients: { email: string; name: string; cohort: string; attendanceRate: string }[] = []
+      if (targetType === 'all') {
+        recipients = students.filter(s => s.status === 'active').map(getRecipientData)
+      } else if (targetType === 'cohort') {
+        recipients = students.filter(s => s.cohortId === selectedCohort && s.status === 'active').map(getRecipientData)
+      } else {
+        recipients = students.filter(s => selectedStudents.includes(s.id)).map(getRecipientData)
+      }
+
+      if (!isSupabaseConfigured) {
+        showToast(`Simulation: Email would be sent to ${recipients.length} students.`, 'info')
+        setSubject('')
+        setBody('')
+        return
+      }
+
+      // 2. Invoke Edge Function
+      const { error } = await supabase.functions.invoke('send-email-blast', {
+        body: {
+          subject,
+          body,
+          recipients,
+          sessionVars: {
+            link: zoomLink,
+            date: sessionDate,
+            time: sessionTime
+          }
+        }
+      })
+
+      if (error) throw error
+
+      showToast(`Email blast sent to ${recipients.length} students!`, 'success')
+      setSubject('')
+      setBody('')
+      setSelectedStudents([])
+    } catch (error: any) {
+      console.error('Error sending email:', error)
+      showToast(error.message || 'Failed to send email blast', 'error')
+    } finally {
+      setSending(false)
+    }
+  }
+  
   const handleSaveDraft = () => {
     showToast('Draft saved!', 'info')
   }
@@ -76,6 +199,7 @@ export function EmailPage({ showToast }: EmailPageProps) {
     .replace('[Link]', 'https://zoom.us/j/1234567890')
     .replace('[Date]', '15 Jan 2025')
     .replace('[Time]', '09:00 AM')
+    .replace('[Rate]', '75%')
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
@@ -110,13 +234,13 @@ export function EmailPage({ showToast }: EmailPageProps) {
                     >
                       <Users className="h-4 w-4" />
                       {selectedCohort 
-                        ? mockCohorts.find(c => c.id === selectedCohort)?.name 
+                        ? cohorts.find(c => c.id === selectedCohort)?.name 
                         : 'Select Cohort'}
                       <ChevronDown className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent>
-                    {mockCohorts.map((cohort) => (
+                    {cohorts.map((cohort) => (
                       <DropdownMenuItem 
                         key={cohort.id}
                         onClick={() => {
@@ -129,8 +253,79 @@ export function EmailPage({ showToast }: EmailPageProps) {
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
+
+                <Button
+                  variant={targetType === 'individual' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setTargetType('individual')}
+                  className="gap-2"
+                >
+                  <Users className="h-4 w-4" />
+                  Select Individuals ({individualCount})
+                </Button>
               </div>
             </div>
+
+            {/* Individual Student Selection */}
+            {targetType === 'individual' && (
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-4 animate-in slide-in-from-top-2 duration-200">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search students..."
+                      value={studentSearch}
+                      onChange={(e) => setStudentSearch(e.target.value)}
+                      className="pl-9 h-8 text-xs"
+                    />
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="text-xs h-8"
+                    onClick={() => setSelectedStudents([])}
+                  >
+                    Clear All
+                  </Button>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[200px] overflow-y-auto pr-1">
+                  {students
+                    .filter(s => s.status === 'active')
+                    .filter(s => 
+                      !studentSearch || 
+                      s.name.toLowerCase().includes(studentSearch.toLowerCase()) ||
+                      s.email.toLowerCase().includes(studentSearch.toLowerCase())
+                    )
+                    .map(student => (
+                      <label 
+                        key={student.id}
+                        className={cn(
+                          "flex items-center gap-2 p-2 rounded border transition-colors cursor-pointer hover:bg-background",
+                          selectedStudents.includes(student.id) && "bg-primary/10 border-primary/50"
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedStudents.includes(student.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedStudents(prev => [...prev, student.id])
+                            } else {
+                              setSelectedStudents(prev => prev.filter(id => id !== student.id))
+                            }
+                          }}
+                          className="h-3.5 w-3.5 rounded border-gray-300 accent-primary"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium truncate">{student.name}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">{student.email}</p>
+                        </div>
+                      </label>
+                    ))}
+                </div>
+              </div>
+            )}
 
             {/* Subject */}
             <div className="space-y-2">
@@ -141,6 +336,93 @@ export function EmailPage({ showToast }: EmailPageProps) {
                 onChange={(e) => setSubject(e.target.value)}
               />
             </div>
+
+            {/* Session Variables (optional) */}
+            {(body.includes('[Link]') || body.includes('[Date]') || body.includes('[Time]') ||
+              subject.includes('[Link]') || subject.includes('[Date]') || subject.includes('[Time]')) && (
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-3 animate-in slide-in-from-top-2 duration-200">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-muted-foreground">Session Variables (used in your template)</p>
+                  {sessions.length > 0 && (body.includes('[Link]') || body.includes('[Date]') || body.includes('[Time]')) && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-7 gap-1 text-xs">
+                          <Calendar className="h-3 w-3" />
+                          {selectedSession ? selectedSession.name : 'Select Session'}
+                          <ChevronDown className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="max-h-[200px] overflow-y-auto">
+                        <DropdownMenuItem onClick={() => {
+                          setSelectedSession(null)
+                          setZoomLink('')
+                          setSessionDate('')
+                          setSessionTime('')
+                        }}>
+                          <span className="text-muted-foreground">Clear selection</span>
+                        </DropdownMenuItem>
+                        {sessions.map((session) => {
+                          const sessionDateStr = new Date(session.date).toLocaleDateString('en-US', { 
+                            day: 'numeric', month: 'short', year: 'numeric' 
+                          })
+                          return (
+                            <DropdownMenuItem 
+                              key={session.id}
+                              onClick={() => {
+                                setSelectedSession(session)
+                                setZoomLink(session.zoomLink || '')
+                                setSessionDate(sessionDateStr)
+                                setSessionTime(session.startTime || '')
+                              }}
+                            >
+                              <div className="flex flex-col">
+                                <span className="font-medium">{session.name}</span>
+                                <span className="text-xs text-muted-foreground">{sessionDateStr} at {session.startTime}</span>
+                              </div>
+                            </DropdownMenuItem>
+                          )
+                        })}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {(body.includes('[Link]') || subject.includes('[Link]')) && (
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Zoom Link</label>
+                      <Input
+                        placeholder="https://zoom.us/j/..."
+                        value={zoomLink}
+                        onChange={(e) => setZoomLink(e.target.value)}
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  )}
+                  {(body.includes('[Date]') || subject.includes('[Date]')) && (
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Session Date</label>
+                      <Input
+                        placeholder="e.g. 25 Dec 2025"
+                        value={sessionDate}
+                        onChange={(e) => setSessionDate(e.target.value)}
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  )}
+                  {(body.includes('[Time]') || subject.includes('[Time]')) && (
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Session Time</label>
+                      <Input
+                        placeholder="e.g. 09:00 AM"
+                        value={sessionTime}
+                        onChange={(e) => setSessionTime(e.target.value)}
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Body */}
             <div className="space-y-2">
@@ -178,9 +460,18 @@ Use variables like [Name], [Link], [Date] for personalization."
 
             {/* Actions */}
             <div className="flex flex-wrap gap-2">
-              <Button onClick={handleSend} disabled={recipientCount === 0}>
-                <Send className="mr-2 h-4 w-4" />
-                Send to {recipientCount} Students
+              <Button onClick={handleSend} disabled={recipientCount === 0 || sending}>
+                {sending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="mr-2 h-4 w-4" />
+                    Send to {recipientCount} Students
+                  </>
+                )}
               </Button>
               <Button variant="outline" onClick={handleSaveDraft}>
                 <Save className="mr-2 h-4 w-4" />
@@ -232,10 +523,8 @@ Use variables like [Name], [Link], [Date] for personalization."
                 variant="outline"
                 className="w-full justify-start"
                 onClick={() => {
-                  if (template.id === '2') {
-                    setSubject('Your Zoom Link for [Date]')
-                    setBody('Hi [Name],\n\nHere is your Zoom link for the upcoming session:\n\n📅 Date: [Date]\n⏰ Time: [Time]\n🔗 Link: [Link]\n\nPlease join 5 minutes early.\n\nBest regards,\nJoy in Living Academy')
-                  }
+                  setSubject(template.subject)
+                  setBody(template.body)
                   showToast(`Template "${template.name}" loaded!`, 'info')
                 }}
               >

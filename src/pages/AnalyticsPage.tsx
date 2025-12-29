@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react'
 import { 
   TrendingUp,
   Users,
@@ -10,26 +11,139 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { mockStudents, mockCohorts, mockSessions, mockAttendance } from '@/data/mockData'
+import { Student, Cohort, Session, AttendanceRecord } from '@/types'
 import { cn } from '@/lib/utils'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { Loader2 } from 'lucide-react'
+import { useEffect } from 'react'
+
+type TimePeriod = 'day' | 'week' | 'month' | 'year'
 
 interface AnalyticsPageProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void
 }
 
+// Helper to filter data by time period
+const getDateRangeForPeriod = (period: TimePeriod): { start: Date; end: Date } => {
+  const end = new Date()
+  const start = new Date()
+  
+  switch (period) {
+    case 'day':
+      start.setHours(0, 0, 0, 0)
+      break
+    case 'week':
+      start.setDate(start.getDate() - 7)
+      break
+    case 'month':
+      start.setMonth(start.getMonth() - 1)
+      break
+    case 'year':
+      start.setFullYear(start.getFullYear() - 1)
+      break
+  }
+  
+  return { start, end }
+}
+
+const periodLabels: Record<TimePeriod, string> = {
+  day: 'Today',
+  week: 'This Week',
+  month: 'This Month',
+  year: 'This Year',
+}
+
 export function AnalyticsPage({ showToast }: AnalyticsPageProps) {
-  const activeCohort = mockCohorts.find(c => c.status === 'active')
-  const cohortStudents = mockStudents.filter(s => s.cohortId === activeCohort?.id)
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('month')
+  const [loading, setLoading] = useState(true)
+  const [students, setStudents] = useState<Student[]>([])
+  const [cohorts, setCohorts] = useState<Cohort[]>([])
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([])
+
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  const fetchData = async () => {
+    try {
+      setLoading(true)
+      if (!isSupabaseConfigured) {
+        setStudents(mockStudents)
+        setCohorts(mockCohorts)
+        setSessions(mockSessions)
+        setAttendance(mockAttendance as any)
+        return
+      }
+
+      const [
+        { data: stData, error: stError },
+        { data: cData, error: cError },
+        { data: sData, error: sError },
+        { data: aData, error: aError }
+      ] = await Promise.all([
+        supabase.from('students').select('*'),
+        supabase.from('cohorts').select('*'),
+        supabase.from('sessions').select('*'),
+        supabase.from('attendance').select('*')
+      ])
+
+      if (stError) throw stError
+      if (cError) throw cError
+      if (sError) throw sError
+      if (aError) throw aError
+
+      if (stData) {
+        setStudents(stData.map((s: any) => ({ ...s, enrolledAt: new Date(s.enrolledAt) })))
+      }
+      if (cData) setCohorts(cData)
+      if (sData) {
+        setSessions(sData.map((s: any) => ({ ...s, date: new Date(s.date) })))
+      }
+      if (aData) {
+        setAttendance(aData.map((a: any) => ({ ...a, syncedAt: new Date(a.syncedAt) })))
+      }
+
+    } catch (error) {
+      console.error('Error fetching analytics data:', error)
+      showToast('Failed to fetch analytics data.', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+  
+  const activeCohort = cohorts.find(c => c.status === 'active')
+  const cohortStudents = students.filter(s => s.cohortId === activeCohort?.id)
+  
+  // Filter sessions by time period
+  const filteredSessions = useMemo(() => {
+    const { start, end } = getDateRangeForPeriod(timePeriod)
+    return sessions.filter(s => {
+      const sessionDate = new Date(s.date)
+      return sessionDate >= start && sessionDate <= end
+    })
+  }, [timePeriod, sessions])
+
+  // Get session IDs within the time period
+  const filteredSessionIds = useMemo(() => {
+    return new Set(filteredSessions.map(s => s.id))
+  }, [filteredSessions])
+
+  // Filter attendance by time period (via session dates)
+  const filteredAttendance = useMemo(() => {
+    return attendance.filter(a => filteredSessionIds.has(a.sessionId))
+  }, [filteredSessionIds, attendance])
   
   // Calculate attendance breakdown
-  const totalRecords = mockAttendance.length
-  const presentCount = mockAttendance.filter(a => a.status === 'present').length
-  const lateCount = mockAttendance.filter(a => a.status === 'late').length
-  const absentCount = mockAttendance.filter(a => a.status === 'absent').length
+  const totalRecords = filteredAttendance.length
+  const presentCount = filteredAttendance.filter(a => a.status === 'present').length
+  const lateCount = filteredAttendance.filter(a => a.status === 'late').length
+  const absentCount = filteredAttendance.filter(a => a.status === 'absent').length
   
   const attendanceBreakdown = [
-    { label: 'Present', count: presentCount, percentage: Math.round((presentCount / totalRecords) * 100), color: 'bg-emerald-500', icon: CheckCircle2 },
-    { label: 'Late', count: lateCount, percentage: Math.round((lateCount / totalRecords) * 100), color: 'bg-amber-500', icon: Clock },
-    { label: 'Absent', count: absentCount, percentage: Math.round((absentCount / totalRecords) * 100), color: 'bg-red-500', icon: XCircle },
+    { label: 'Present', count: presentCount, percentage: totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0, color: 'bg-emerald-500', icon: CheckCircle2 },
+    { label: 'Late', count: lateCount, percentage: totalRecords > 0 ? Math.round((lateCount / totalRecords) * 100) : 0, color: 'bg-amber-500', icon: Clock },
+    { label: 'Absent', count: absentCount, percentage: totalRecords > 0 ? Math.round((absentCount / totalRecords) * 100) : 0, color: 'bg-red-500', icon: XCircle },
   ]
 
   // Group students by attendance rate
@@ -59,7 +173,7 @@ export function AnalyticsPage({ showToast }: AnalyticsPageProps) {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `attendance_report_${new Date().toISOString().split('T')[0]}.csv`
+    a.download = `attendance_report_${timePeriod}_${new Date().toISOString().split('T')[0]}.csv`
     a.click()
     window.URL.revokeObjectURL(url)
     
@@ -73,67 +187,92 @@ export function AnalyticsPage({ showToast }: AnalyticsPageProps) {
         <div>
           <h2 className="text-lg font-semibold">Attendance Analytics</h2>
           <p className="text-sm text-muted-foreground">
-            View attendance reports and export data
+            View attendance reports and export data • {periodLabels[timePeriod]}
           </p>
         </div>
-        <Button onClick={handleExportCSV}>
-          <Download className="mr-2 h-4 w-4" />
-          Export CSV
-        </Button>
+        <div className="flex items-center gap-3">
+          {/* Time Period Selector */}
+          <div className="flex rounded-lg border bg-muted/50 p-1">
+            {(['day', 'week', 'month', 'year'] as TimePeriod[]).map((period) => (
+              <button
+                key={period}
+                onClick={() => setTimePeriod(period)}
+                className={cn(
+                  'px-3 py-1.5 text-sm font-medium rounded-md transition-all',
+                  timePeriod === period
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {period === 'day' ? 'Day' : period === 'week' ? 'Week' : period === 'month' ? 'Month' : 'Year'}
+              </button>
+            ))}
+          </div>
+          <Button onClick={handleExportCSV}>
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
       </div>
 
       {/* Overview Stats */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardContent className="flex items-center gap-4 p-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-              <Users className="h-6 w-6 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{cohortStudents.length}</p>
-              <p className="text-sm text-muted-foreground">Active Students</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="flex items-center gap-4 p-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-100">
-              <TrendingUp className="h-6 w-6 text-emerald-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">
-                {Math.round(cohortStudents.reduce((acc, s) => acc + s.attendanceRate, 0) / cohortStudents.length)}%
-              </p>
-              <p className="text-sm text-muted-foreground">Avg Attendance</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="flex items-center gap-4 p-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100">
-              <Calendar className="h-6 w-6 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{mockSessions.length}</p>
-              <p className="text-sm text-muted-foreground">Total Sessions</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="flex items-center gap-4 p-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
-              <Clock className="h-6 w-6 text-amber-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{totalRecords}</p>
-              <p className="text-sm text-muted-foreground">Attendance Records</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {loading ? (
+        <div className="flex h-32 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+                <Users className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{cohortStudents.length}</p>
+                <p className="text-sm text-muted-foreground">Active Students</p>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-100">
+                <TrendingUp className="h-6 w-6 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">
+                  {cohortStudents.length > 0 ? Math.round(cohortStudents.reduce((acc, s) => acc + s.attendanceRate, 0) / cohortStudents.length) : 0}%
+                </p>
+                <p className="text-sm text-muted-foreground">Avg Attendance</p>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100">
+                <Calendar className="h-6 w-6 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{filteredSessions.length}</p>
+                <p className="text-sm text-muted-foreground">Sessions</p>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="flex items-center gap-4 p-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
+                <Clock className="h-6 w-6 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{totalRecords}</p>
+                <p className="text-sm text-muted-foreground">Attendance Records</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Attendance Breakdown */}
